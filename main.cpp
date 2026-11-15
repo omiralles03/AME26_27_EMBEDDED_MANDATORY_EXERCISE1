@@ -8,16 +8,19 @@ Photoresistor photoresistor(A0);
 Thermistor thermistor(A3);
 Grove_LCD_RGB_Backlight lcd(D14, D15); // LCD display 2 rows and 16 columns (I2C)
 AnalogIn rotarySensor(A1);
-InterruptIn button(D2);
-DigitalOut led(D4);
+InterruptIn button(D5);
+PwmOut led(D3);
+PwmOut buzzer(D6);
+Ticker buzzerTicker;
 
 enum class AppState { NORMAL, SET_HIGH, SET_LOW, WARNING, ALARM, ACKNOWLEDGE};
 volatile AppState currentState = AppState::NORMAL; // (volatile) States handled by ISR > read from RAM
 AppState prevState = AppState::NORMAL;
+AppState buzzerState = AppState::NORMAL;
 
 float lowerThreshold = 10.0f; // Default lower threshold for temperature
-float upperThreshold = 20.0f; // Default upper threshold for temperature
-bool ledState = false;        // State of the LED (on/off)
+float upperThreshold = 25.0f; // Default upper threshold for temperature
+const float HYSTERESIS = 0.5f;
 
 // Helper to convert state enum to a short string
 const char* getStateName(AppState state) {
@@ -86,10 +89,42 @@ void ISR_Button() {
     }
 }
 
+volatile bool buzzerOn = false;
+void toggleBuzzer() {
+    buzzerOn = !buzzerOn;
+    buzzer.write(buzzerOn ? 0.5f : 0.0f);
+}
+
+struct SensorReads {
+    float lux;
+    float tmp;
+};
+
+SensorReads average_read() {
+    float sumLux = 0.0f;
+    float sumTmp = 0.0f;
+
+    for (int i = 0; i < 10; i++) {
+        sumLux += photoresistor.calculateLux();
+        sumTmp += thermistor.read_celsius();
+        ThisThread::sleep_for(2ms);
+    }
+
+    return {
+        sumLux / 10.0f,
+        sumTmp / 10.0f,
+    };
+}
+
 int main() {
     //i2c_bus_scan();
     button.mode(PullUp);
     button.fall(&ISR_Button);
+
+    led.period_ms(10);
+
+    buzzer.period_ms(10);
+    buzzer.write(0.0f);
 
     float rotaryVal = 0.0f;
 
@@ -97,12 +132,25 @@ int main() {
     lcd.setRGB(255, 255, 255);
 
     while (true) {
-        float currentLux = photoresistor.calculateLux();
-        float currentTemp = thermistor.read_celsius();
+        SensorReads reads = average_read();
+        float currentLux = reads.lux;
+        float currentTemp = reads.tmp;
 
         // Convert lux to % scale
-        float luxPercentage = (currentLux / 355.0f) * 100.0f;
-        float rotaryVal = rotarySensor.read();
+        // At 3.3V => maxLux ~= 155
+        float luxPercentage = (currentLux / 155.0f) * 100.0f;
+        // Clamp values
+        if (luxPercentage > 100.0f) { 
+            luxPercentage = 100.0f; 
+        }
+        if (luxPercentage < 0.0f) {
+            luxPercentage = 0.0f;
+        }
+
+        float dutyCycle = (100.0f - luxPercentage) / 100.0f;
+        led.write(dutyCycle);
+
+        rotaryVal = rotarySensor.read();
         
         switch (currentState) {
             case AppState::NORMAL:
@@ -118,7 +166,7 @@ int main() {
                 if (currentTemp > upperThreshold + 3.0f || currentTemp < lowerThreshold - 3.0f) {
                     currentState = AppState::ALARM;
                 }
-                if (currentTemp <= upperThreshold && currentTemp >= lowerThreshold) {
+                if (currentTemp <= (upperThreshold - HYSTERESIS) && currentTemp >= (lowerThreshold + HYSTERESIS)) {
                     currentState = AppState::NORMAL;
                 }
                 break;
@@ -127,7 +175,7 @@ int main() {
                 break;
 
             case AppState::ACKNOWLEDGE:
-                if (currentTemp <= upperThreshold && currentTemp >= lowerThreshold) {
+                if (currentTemp <= (upperThreshold - HYSTERESIS) && currentTemp >= (lowerThreshold + HYSTERESIS)) {
                     currentState = AppState::NORMAL;
                 }
 
@@ -152,8 +200,32 @@ int main() {
                 break;
         }
 
-        printf("State: %s | Temp: %.1f | Lux: %.1f | LED: %s | Low: %.1f | High: %.1f | RotVal: %.1f \n",
-               getStateName(currentState), currentTemp, currentLux, ledState ? "ON" : "OFF", lowerThreshold, upperThreshold, rotaryVal);
+        if (currentState != buzzerState) {
+            buzzerState = currentState;
+
+            switch (currentState) {
+                case AppState::WARNING:
+                    buzzerTicker.attach(&toggleBuzzer, 1000ms);
+                    break;
+                case AppState::ALARM:
+                    buzzerTicker.attach(&toggleBuzzer, 200ms);
+                    break;
+                default:
+                    buzzerTicker.detach();
+                    buzzer.write(0.0f);
+                    buzzerOn = false;
+            }
+        }
+
+        printf("State: %s | Temp: %.1f | Lux: %.1f | LED PWM: %.1f | Buzz: %s | Low: %.1f | High: %.1f | RotVal: %.1f \n",
+               getStateName(currentState),
+               currentTemp,
+               currentLux,
+               dutyCycle * 100.0f,
+               buzzerOn ? "ON" : "OFF",
+               lowerThreshold,
+               upperThreshold,
+               rotaryVal);
 
         // updateLCD(currentState, luxPercentage, ledState, lowerThreshold, upperThreshold);
 
