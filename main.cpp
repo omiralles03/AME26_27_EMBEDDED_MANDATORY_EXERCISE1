@@ -35,18 +35,19 @@ const char* getStateName(AppState state) {
     return "UNK";
 }
 
-// LCD PRINT - UNUSED, LCD not working :(
-void updateLCD(AppState state, float luxPct, bool ledOn, float lowThresh, float highThresh) {
+void updateLCD(AppState state, float tempC, float luxPct, float lowThresh, float highThresh) {
+    char buf[17];
     char line1[17];
     char line2[17];
 
-    // Row 0: Mode, Light %, and LED status
-    snprintf(line1, sizeof(line1), "%-6s L:%.0f%% %s", getStateName(state), luxPct, ledOn ? "ON " : "OFF");
+    // Row 0: Mode, Temperature (C), and Light %
+    snprintf(buf, sizeof(buf), "%-5s %4.1fC %3.0f%%", getStateName(state), tempC, luxPct);
+    snprintf(line1, sizeof(line1), "%-16s", buf);
     
-    // Row 1: Thresholds
-    snprintf(line2, sizeof(line2), "Lo:%.0f%% Hi:%.0f%%", lowThresh, highThresh);
+    // Row 1: Temperature thresholds
+    snprintf(buf, sizeof(buf), "Lo:%.0fC Hi:%.0fC", lowThresh, highThresh);
+    snprintf(line2, sizeof(line2), "%-16s", buf);
 
-    lcd.clear();
     lcd.locate(0, 0);
     lcd.print(line1);
     lcd.locate(0, 1);
@@ -128,6 +129,7 @@ int main() {
 
     float rotaryVal = 0.0f;
 
+    lcd.init();
     lcd.clear();
     lcd.setRGB(255, 255, 255);
 
@@ -227,7 +229,7 @@ int main() {
                upperThreshold,
                rotaryVal);
 
-        // updateLCD(currentState, luxPercentage, ledState, lowerThreshold, upperThreshold);
+        updateLCD(currentState, currentTemp, luxPercentage, lowerThreshold, upperThreshold);
 
         ThisThread::sleep_for(200ms); // Avoid 100% CPU Usage
     }
