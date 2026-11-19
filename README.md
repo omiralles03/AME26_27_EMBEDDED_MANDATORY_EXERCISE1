@@ -233,18 +233,3 @@ State: NORM | Temp: 23.4 | Lux: 85.2 | LED PWM: 45.0 | Buzz: OFF | Low: 10.0 | H
 2. Select target **`NUCLEO_F767ZI`**.
 3. Build and flash the binary to the board via ST-Link.
 4. *(Optional)* Open a serial monitor at **9600 baud** (default Mbed OS baud rate) to view telemetry output.
-
----
-
-## Troubleshooting & Known Notes
-
-### LCD Troubleshooting
-- **Gray squares on Row 0**: Indicates the LCD controller did not receive initialization commands. Ensure `lcd.init()` runs in `main()` (already fixed in this repo), verify the Grove cable is in an **I²C** port (`D14`/`D15`), and check if your setup requires 4.7 kΩ pull-up resistors on SDA/SCL.
-- **Text works but backlight is off**: Grove LCD **v4.0** uses RGB I²C address `0xC4` (7-bit `0x62`), whereas **v5.0** uses `0x60` (7-bit `0x30`). Check the hardware revision printed on the back of your LCD module.
-
-### Codebase Caveats (Observed, Unmodified)
-- **Button pin & debouncing**: `main.cpp` uses `D5` with `ISR_Button()` and no software debounce; mechanical bounce can trigger multiple state transitions per press. (The course PDF also mentions the onboard `PC13` / `BUTTON1` as an option.)
-- **`prevState` volatility**: `prevState` is read and written inside `ISR_Button()` but is not declared `volatile`.
-- **Lux scaling mismatch**: `main.cpp` divides `currentLux` by `155.0f` for `luxPercentage`, while `Photoresistor` scales/clamps `scaledLux` up to `355.0f`.
-- **Buzzer pattern/frequency**: `WARNING` currently toggles 50% duty every `1000 ms` (1 s on / 1 s off) rather than a short pulse with a long pause, and `period_ms(10)` (100 Hz) may be low-pitched on passive piezo buzzers.
-- **Unused helper**: `Thermistor::calculateConductance()` does not guard against `r_therm == 0.0f` before dividing.
